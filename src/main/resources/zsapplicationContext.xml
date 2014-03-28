@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:context="http://www.springframework.org/schema/context"
+	xmlns:jms="http://www.springframework.org/schema/jms" xmlns:tx="http://www.springframework.org/schema/tx"
+	xmlns:jdbc="http://www.springframework.org/schema/jdbc"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans
+     http://www.springframework.org/schema/beans/spring-beans-3.2.xsd
+     http://www.springframework.org/schema/context
+     http://www.springframework.org/schema/context/spring-context-3.2.xsd
+     http://www.springframework.org/schema/tx http://www.springframework.org/schema/tx/spring-tx-3.2.xsd
+     http://www.springframework.org/schema/jdbc http://www.springframework.org/schema/jdbc/spring-jdbc-3.2.xsd
+	http://www.springframework.org/schema/jms http://www.springframework.org/schema/jms/spring-jms-3.2.xsd">
+
+	<context:component-scan base-package="com.joviansoft.jms" />
+	<context:component-scan base-package="com.joviansoft.jms.service" />
+	<!-- 可以产生Connection的ConnectionFactory，由对应的 JMS服务厂商提供，消息中间件的服务地址配置 -->
+	<bean id="targetConnectionFactory" class="org.apache.activemq.ActiveMQConnectionFactory">
+		<property name="brokerURL"
+			value="failover:(tcp://192.168.1.99:61616)?trackMessages=false&amp;initialReconnectDelay=10" />
+	</bean>
+
+	<!-- Spring用于管理的ConnectionFactory -->
+	<bean id="connectionFactory"
+		class="org.springframework.jms.connection.SingleConnectionFactory">
+		<!-- 目标ConnectionFactory对应真实的可以产生JMS Connection的ConnectionFactory -->
+		<property name="targetConnectionFactory" ref="targetConnectionFactory" />
+	</bean>
+
+	<!-- Spring提供的JMS工具类，它可以进行消息发送、接收等 -->
+	<bean id="jmsTemplate" class="org.springframework.jms.core.JmsTemplate">
+		<!-- 这个connectionFactory对应的是我们定义的Spring提供的那个ConnectionFactory对象 -->
+		<property name="connectionFactory" ref="connectionFactory" />
+	</bean>
+	<!-- 消息监听器 -->
+	<bean id="consumerMessageListener" class="com.joviansoft.jms.listener.ConsumerMessageListener" />
+
+	<!--队列目的地，点对点的消息服务的配置 -->
+	<bean id="queueDestination" class="org.apache.activemq.command.ActiveMQQueue">
+		<constructor-arg>
+			<value>queue</value>
+		</constructor-arg>
+	</bean>
+
+	<!--警车轨迹主题 -->
+	<bean id="carGpsTopicDestination" class="org.apache.activemq.command.ActiveMQTopic">
+		<constructor-arg value="topic-gps-car" />
+	</bean>
+
+	<!-- 警车消息监听容器，测试 -->
+	<bean id="jmsCarContainer"
+		class="org.springframework.jms.listener.DefaultMessageListenerContainer">
+		<property name="connectionFactory" ref="connectionFactory" />
+		<property name="destination" ref="carGpsTopicDestination" />
+		<property name="messageListener" ref="consumerMessageListener" />
+	</bean>
+
+	<!--110报警信息 主题 -->
+	<bean id="case110TopicDestination" class="org.apache.activemq.command.ActiveMQTopic">
+		<constructor-arg value="anjian" />
+	</bean>
+	<!-- 110报警消息监听容器，测试 -->
+	<bean id="jmsCase110Container"
+		class="org.springframework.jms.listener.DefaultMessageListenerContainer">
+		<property name="connectionFactory" ref="connectionFactory" />
+		<property name="destination" ref="case110TopicDestination" />
+		<property name="messageListener" ref="consumerMessageListener" />
+	</bean>
+
+	<!-- DataSource (连接外部数据库oracle的连接配置属性文件 。 -->
+	<bean id="propertyConfigurer"
+		class="org.springframework.beans.factory.config.PropertyPlaceholderConfigurer">
+		<property name="locations">
+			<list>
+				<value>jdbc.properties</value>
+			</list>
+		</property>
+	</bean>
+
+	<!-- 连接本地数据库的数据源 oracle -->
+	<bean id="dataSource" class="com.mchange.v2.c3p0.ComboPooledDataSource"
+		destroy-method="close">
+		<property name="driverClass" value="${frame.jdbc.driverClassName}" />
+		<property name="jdbcUrl" value="${frame.jdbc.url}" />
+		<property name="user" value="${frame.jdbc.username}" />
+		<property name="password" value="${frame.jdbc.password}" />
+	</bean>
+
+	<!-- jdbc 数据库连接接口 -->
+	<!-- <bean id="jdbcDao" class="com.joviansoft.frame.dao.jdbc.JdbcDao" scope="singleton"> 
+		<property name="dataSource"> <ref bean="dataSource" /> </property> </bean> -->
+	<!-- 连接外部数据库的数据源 -->
+	<bean id="dataSourceRemote" class="com.mchange.v2.c3p0.ComboPooledDataSource"
+		destroy-method="close">
+		<property name="driverClass" value="${remote.jdbc.driverClassName}" />
+		<property name="jdbcUrl" value="${remote.jdbc.url}" />
+		<property name="user" value="${remote.jdbc.username}" />
+		<property name="password" value="${remote.jdbc.password}" />
+	</bean>
+
+	<!-- 内存数据库 datasource -->
+	<!-- <jdbc:embedded-database id="memDataSource"> <jdbc:script location="classpath:database/hsqldb-schema.sql" 
+		encoding="UTF-8" /> <jdbc:script location="classpath:database/hsqldb-dataload-case.sql" 
+		encoding="UTF-8" /> <jdbc:script location="classpath:database/hsqldb-dataload-gps.sql" 
+		encoding="UTF-8" /> <jdbc:script location="classpath:database/hsqldb-dataload-bjlxdmb.sql" 
+		encoding="UTF-8" /> </jdbc:embedded-database> -->
+
+	<!-- 事物配置 -->
+	<bean id="txProxyTemplate" abstract="true"
+		class="org.springframework.transaction.interceptor.TransactionProxyFactoryBean">
+		<property name="proxyTargetClass">
+			<value>true</value>
+		</property>
+		<property name="transactionManager">
+			<ref bean="transactionManager" />
+		</property>
+		<property name="transactionAttributes">
+			<props>
+				<prop key="get*">PROPAGATION_REQUIRED,readOnly,ISOLATION_DEFAULT,-Exception
+				</prop>
+				<prop key="query*">PROPAGATION_REQUIRED,readOnly,ISOLATION_DEFAULT,-Exception
+				</prop>
+				<prop key="calc*">PROPAGATION_REQUIRED,readOnly,ISOLATION_DEFAULT,-Exception
+				</prop>
+				<prop key="find*">PROPAGATION_REQUIRED,readOnly,ISOLATION_DEFAULT,-Exception
+				</prop>
+				<prop key="search*">PROPAGATION_REQUIRED,readOnly,ISOLATION_DEFAULT,-Exception
+				</prop>
+				<prop key="insert*">PROPAGATION_REQUIRED,ISOLATION_DEFAULT,-Exception
+				</prop>
+				<prop key="update*">PROPAGATION_REQUIRED,ISOLATION_DEFAULT,-Exception
+				</prop>
+				<prop key="delete*">PROPAGATION_REQUIRED,ISOLATION_DEFAULT,-Exception
+				</prop>
+				<prop key="save*">PROPAGATION_REQUIRED,ISOLATION_DEFAULT,-Exception
+				</prop>
+				<!-- <prop key="*">PROPAGATION_SUPPORTS,ISOLATION_DEFAULT,-Exception</prop> -->
+			</props>
+		</property>
+	</bean>
+
+	<!-- transaction manager, use JtaTransactionManager for global tx -->
+	<bean id="transactionManager"
+		class="org.springframework.jdbc.datasource.DataSourceTransactionManager">
+		<property name="dataSource" ref="dataSource" />
+	</bean>
+
+	<!-- define the SqlSessionFactory -->
+	<bean id="sqlSessionFactory" class="org.mybatis.spring.SqlSessionFactoryBean">
+		<property name="dataSource" ref="dataSource" />
+		<property name="typeAliasesPackage" value="com.joviansoft.jms.domain" />
+	</bean>
+
+	<!-- scan for mappers and let them be autowired -->
+	<bean class="org.mybatis.spring.mapper.MapperScannerConfigurer">
+		<property name="sqlSessionFactoryBeanName" value="sqlSessionFactory" />
+		<property name="basePackage" value="com.joviansoft.jms.dao" />
+	</bean>
+
+
+	<!-- transaction manager, use JtaTransactionManager for global tx -->
+	<bean id="transactionManager1"
+		class="org.springframework.jdbc.datasource.DataSourceTransactionManager">
+		<property name="dataSource" ref="dataSourceRemote" />
+	</bean>
+
+	<!-- define the SqlSessionFactory -->
+	<bean id="sqlSessionFactory1" class="org.mybatis.spring.SqlSessionFactoryBean">
+		<property name="dataSource" ref="dataSourceRemote" />
+		<property name="typeAliasesPackage" value="com.joviansoft.jms.domain1" />
+	</bean>
+
+	<!-- scan for mappers and let them be autowired -->
+	<bean class="org.mybatis.spring.mapper.MapperScannerConfigurer">
+		<property name="sqlSessionFactoryBeanName" value="sqlSessionFactory1" />
+		<property name="basePackage" value="com.joviansoft.jms.dao1" />
+	</bean>
+
+	<!-- 警车GPS轨迹 Demo推送服务。 -->
+	<bean id="carGpsPushService" class="com.joviansoft.jms.service.CarTraceDemoPushService">
+		<property name="destination" ref="carGpsTopicDestination" />
+		<property name="pushSpeed" value="1" />
+	</bean>
+
+	<!-- 110报警Demo推送服务。 -->
+	<!-- <bean id="case110PushService" class="com.joviansoft.jms.service.Case110DemoPushService"> 
+		<property name="destination" ref="case110TopicDestination" /> <property name="pushSpeed" 
+		value="24" /> </bean> -->
+	<!-- 110报警信息真实服务。 -->
+	<bean id="case110PushService" class="com.joviansoft.jms.service.Case110PushService">
+		<property name="destination" ref="case110TopicDestination" />
+	</bean>
+</beans>
